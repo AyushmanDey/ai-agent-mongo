@@ -1,6 +1,7 @@
 from typing import Annotated
 from typing_extensions import TypedDict
 from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, trim_messages
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from llm import get_llm_with_tools
@@ -20,9 +21,17 @@ def build_graph(checkpointer=None):
 
     # 2. AGENT NODE: the LLM looks at all messages and decides what to do.
     def agent_node(state: GraphState):
-        response = llm_with_tools.invoke({"messages": state["messages"]})
+        # Send only the most recent messages to the LLM.
+        # Full history stays saved in MongoDB.
+        recent = trim_messages(
+            state["messages"],
+            strategy="last",
+            token_counter=len,     # count messages, not tokens (simple)
+            max_tokens=20,         # keep the last ~20 messages
+            start_on="human",      # never start mid tool-call
+        )
+        response = llm_with_tools.invoke({"messages": recent})
         return {"messages": [response]}
-
     # 3. TOOL NODE: run every tool the LLM asked for.
     def tool_node(state: GraphState):
         last_message = state["messages"][-1]
